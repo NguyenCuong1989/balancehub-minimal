@@ -12,6 +12,15 @@ venv/
 
 # Env files
 .env
+.env.portal
 
-# JVM crash logs
-hs_err_pid*.log
+# IDEs and Tools
+.vscode/
+.calva/
+.lsp/
+.clj-kondo/
+*.bin
+*.json
+!package.json
+!composer.json
+!*.md

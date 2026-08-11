@@ -1,42 +1,89 @@
-"""APΩ ontology lint – lightweight structural check.
-
-Verifies that known ontology-related directories / files are present when they
-exist in the repository.  If none of the optional paths are found the script
-still exits 0, so the CI step is safe to run on a fresh or minimal checkout.
 """
-
-from __future__ import annotations
-
+APO Ontology Lint Check
+Validates that the runtime symbol map is consistent with the APO canon definitions.
+Exits with code 1 if any drift is detected.
+"""
 import sys
 from pathlib import Path
 
-# Paths that *should* exist when the core application layer is present.
-# Listed relative to the repository root (where this script is executed from).
-OPTIONAL_ONTOLOGY_PATHS: list[str] = [
-    "app",
-]
+# Allow importing from the app package without installation.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.core.apo_canon import (
+    LANGUAGE_ID,
+    LANGUAGE_SYMBOL,
+    CODE_SIGNATURE,
+    SPEC_VERSION,
+    SPEC_SHA256,
+    ONTOLOGICAL_ROOT,
+    KERNEL_ID,
+    INVALID_SYMBOL,
+    ONTOLOGY_WATERMARK,
+    OPERATORS,
+    CONNECTOR_OPERATOR_BINDING,
+)
+from app.core.apo_symbol_map import (
+    SIGMA_APOMEGA_COS,
+    APO_CODE_SIGNATURE,
+    APO_ORIGIN,
+    APO_INVALID,
+)
+
+errors: list[str] = []
 
 
-def main() -> int:
-    repo_root = Path(__file__).resolve().parent.parent
-    missing: list[str] = []
-    found: list[str] = []
-
-    for rel_path in OPTIONAL_ONTOLOGY_PATHS:
-        target = repo_root / rel_path
-        if target.exists():
-            found.append(rel_path)
-        else:
-            missing.append(rel_path)
-
-    if found:
-        print(f"APΩ lint OK – verified {len(found)} path(s): {', '.join(found)}")
-    if missing:
-        # Non-fatal: log but do not fail when optional paths are absent.
-        print(f"APΩ lint INFO – optional path(s) not found (skipped): {', '.join(missing)}")
-
-    return 0
+def check(condition: bool, message: str) -> None:
+    if not condition:
+        errors.append(message)
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+# --- Identity constants must be consistent across modules ---
+check(
+    SIGMA_APOMEGA_COS == LANGUAGE_SYMBOL,
+    f"Symbol map SIGMA_APOMEGA_COS '{SIGMA_APOMEGA_COS}' != apo_canon LANGUAGE_SYMBOL '{LANGUAGE_SYMBOL}'",
+)
+check(
+    APO_CODE_SIGNATURE == CODE_SIGNATURE,
+    f"Symbol map APO_CODE_SIGNATURE '{APO_CODE_SIGNATURE}' != apo_canon CODE_SIGNATURE '{CODE_SIGNATURE}'",
+)
+check(
+    APO_ORIGIN == ONTOLOGICAL_ROOT,
+    f"Symbol map APO_ORIGIN '{APO_ORIGIN}' != apo_canon ONTOLOGICAL_ROOT '{ONTOLOGICAL_ROOT}'",
+)
+check(
+    APO_INVALID == INVALID_SYMBOL,
+    f"Symbol map APO_INVALID '{APO_INVALID}' != apo_canon INVALID_SYMBOL '{INVALID_SYMBOL}'",
+)
+
+# --- All OPERATORS entries must have required keys ---
+required_operator_keys = {"symbol", "hexagram", "name"}
+for op_id, meta in OPERATORS.items():
+    missing = required_operator_keys - meta.keys()
+    check(
+        not missing,
+        f"Operator '{op_id}' is missing keys: {missing}",
+    )
+
+# --- All connector operator bindings must reference valid operator IDs ---
+valid_ops = set(OPERATORS.keys())
+for connector, op_id in CONNECTOR_OPERATOR_BINDING.items():
+    check(
+        op_id in valid_ops,
+        f"Connector '{connector}' references unknown operator ID '{op_id}'",
+    )
+
+# --- Spec integrity: SPEC_SHA256 must be a 64-char hex string ---
+check(
+    len(SPEC_SHA256) == 64 and all(c in "0123456789abcdef" for c in SPEC_SHA256),
+    f"SPEC_SHA256 '{SPEC_SHA256}' is not a valid 64-char lowercase hex digest",
+)
+
+# --- Report ---
+if errors:
+    print("❌ APO ontology lint FAILED:")
+    for err in errors:
+        print(f"  • {err}")
+    sys.exit(1)
+
+print(f"✅ APO ontology lint passed ({len(OPERATORS)} operators, {len(CONNECTOR_OPERATOR_BINDING)} connector bindings verified)")
